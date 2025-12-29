@@ -277,58 +277,6 @@ public class VideoTrim: RCTEventEmitter, AssetLoaderDelegate, UIDocumentPickerDe
     emitEventToJS("onStartTrimming", eventData: nil)
     
     var ffmpegSession: FFmpegSession?
-    let progressAlert = ProgressAlertController()
-    progressAlert.modalPresentationStyle = .overFullScreen
-    progressAlert.modalTransitionStyle = .crossDissolve
-    progressAlert.setTitle(trimmingText)
-    
-    if enableCancelTrimming {
-      progressAlert.setCancelTitle(cancelTrimmingButtonText)
-      progressAlert.showCancelBtn()
-      progressAlert.onDismiss = {
-        if self.enableCancelTrimmingDialog {
-          let dialogMessage = UIAlertController(title: self.cancelTrimmingDialogTitle, message: self.cancelTrimmingDialogMessage, preferredStyle: .alert)
-          dialogMessage.overrideUserInterfaceStyle = .dark
-          
-          // Create OK button with action handler
-          let ok = UIAlertAction(title: self.cancelDialogConfirmText, style: .destructive, handler: { (action) -> Void in
-            
-            if let ffmpegSession = ffmpegSession {
-              ffmpegSession.cancel()
-            } else {
-              self.emitEventToJS("onCancelTrimming", eventData: nil)
-            }
-            
-            progressAlert.dismiss(animated: true)
-          })
-          
-          // Create Cancel button with action handlder
-          let cancel = UIAlertAction(title: self.cancelDialogCancelText, style: .cancel)
-          
-          //Add OK and Cancel button to an Alert object
-          dialogMessage.addAction(ok)
-          dialogMessage.addAction(cancel)
-          
-          // Present alert message to user
-          if let root = RCTPresentedViewController() {
-            root.present(dialogMessage, animated: true, completion: nil)
-          }
-        } else {
-          if let ffmpegSession = ffmpegSession {
-            ffmpegSession.cancel()
-          } else {
-            self.emitEventToJS("onCancelTrimming", eventData: nil)
-          }
-          
-          progressAlert.dismiss(animated: true)
-        }
-        
-      }
-    }
-    
-    if let root = RCTPresentedViewController() {
-      root.present(progressAlert, animated: true, completion: nil)
-    }
     
     var cmds = [
       "-ss",
@@ -359,11 +307,6 @@ public class VideoTrim: RCTEventEmitter, AssetLoaderDelegate, UIDocumentPickerDe
     self.emitEventToJS("onLog", eventData: eventPayload)
     
     ffmpegSession = FFmpegKit.execute(withArgumentsAsync: cmds, withCompleteCallback: { session in
-      
-      // always hide progressAlert
-      DispatchQueue.main.async {
-        progressAlert.dismiss(animated: true)
-      }
       
       let state = session?.getState()
       let returnCode = session?.getReturnCode()
@@ -439,14 +382,6 @@ public class VideoTrim: RCTEventEmitter, AssetLoaderDelegate, UIDocumentPickerDe
       
     }, withStatisticsCallback: { statistics in
       guard let statistics = statistics else { return }
-      
-      let timeInMilliseconds = statistics.getTime()
-      if timeInMilliseconds > 0 {
-        let completePercentage = timeInMilliseconds / (videoDuration * 1000); // from 0 -> 1
-        DispatchQueue.main.async {
-          progressAlert.setProgress(Float(completePercentage))
-        }
-      }
       
       let eventPayload: [String: Any] = [
         "sessionId": statistics.getSessionId(),
@@ -819,62 +754,12 @@ extension VideoTrim {
       vc.configure(config: config)
       
       vc.cancelBtnClicked = {
-        if !self.enableCancelDialog {
-          self.emitEventToJS("onCancel", eventData: nil)
-          
-          self.closeEditor()
-          return
-        }
-        
-        // Create Alert
-        let dialogMessage = UIAlertController(title: self.cancelDialogTitle, message: self.cancelDialogMessage, preferredStyle: .alert)
-        dialogMessage.overrideUserInterfaceStyle = .dark
-        
-        // Create OK button with action handler
-        let ok = UIAlertAction(title: self.cancelDialogConfirmText, style: .destructive, handler: { (action) -> Void in
-          self.emitEventToJS("onCancel", eventData: nil)
-          self.closeEditor()
-        })
-        
-        // Create Cancel button with action handlder
-        let cancel = UIAlertAction(title: self.cancelDialogCancelText, style: .cancel)
-        
-        //Add OK and Cancel button to an Alert object
-        dialogMessage.addAction(ok)
-        dialogMessage.addAction(cancel)
-        
-        // Present alert message to user
-        if let root = RCTPresentedViewController() {
-          root.present(dialogMessage, animated: true, completion: nil)
-        }
+        self.emitEventToJS("onCancel", eventData: nil)
+        self.closeEditor()
       }
       
       vc.saveBtnClicked = {(selectedRange: CMTimeRange) in
-        if !self.enableSaveDialog {
-          self.trim(viewController: vc,inputFile: destPath, videoDuration: self.vc!.asset!.duration.seconds, startTime: selectedRange.start.seconds, endTime: selectedRange.end.seconds)
-          return
-        }
-        
-        // Create Alert
-        let dialogMessage = UIAlertController(title: self.saveDialogTitle, message: self.saveDialogMessage, preferredStyle: .alert)
-        dialogMessage.overrideUserInterfaceStyle = .dark
-        
-        // Create OK button with action handler
-        let ok = UIAlertAction(title: self.saveDialogConfirmText, style: .default, handler: { (action) -> Void in
-          self.trim(viewController: vc,inputFile: destPath, videoDuration: vc.asset!.duration.seconds, startTime: selectedRange.start.seconds, endTime: selectedRange.end.seconds)
-        })
-        
-        // Create Cancel button with action handlder
-        let cancel = UIAlertAction(title: self.saveDialogCancelText, style: .cancel)
-        
-        //Add OK and Cancel button to an Alert object
-        dialogMessage.addAction(ok)
-        dialogMessage.addAction(cancel)
-        
-        // Present alert message to user
-        if let root = RCTPresentedViewController() {
-          root.present(dialogMessage, animated: true, completion: nil)
-        }
+        self.trim(viewController: vc,inputFile: destPath, videoDuration: self.vc!.asset!.duration.seconds, startTime: selectedRange.start.seconds, endTime: selectedRange.end.seconds)
       }
       
       vc.isModalInPresentation = true // prevent modal closed by swipe down
