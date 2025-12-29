@@ -64,9 +64,7 @@ open class BaseVideoTrimModule internal constructor(
   private var isInit: Boolean = false
   private var trimmerView: VideoTrimmerView? = null
   private var alertDialog: AlertDialog? = null
-  private var mProgressDialog: AlertDialog? = null
   private var cancelTrimmingConfirmDialog: AlertDialog? = null
-  private var mProgressBar: ProgressBar? = null
   private var outputFile: String? = null
   private var isVideoType = true
   private var editorConfig: ReadableMap? = null
@@ -272,12 +270,7 @@ open class BaseVideoTrimModule internal constructor(
   }
 
   override fun onTrimmingProgress(percentage: Int) {
-    // prevent onTrimmingProgress is called after onFinishTrim (some rare cases)
-    if (mProgressBar == null) {
-      return
-    }
-
-    mProgressBar!!.setProgress(percentage, true)
+    // Progress tracking removed - spinner on button indicates processing
   }
 
 
@@ -333,51 +326,12 @@ open class BaseVideoTrimModule internal constructor(
   }
 
   override fun onCancel() {
-    if (!editorConfig?.getBoolean("enableCancelDialog")!!) {
-      sendEvent("onCancel", null)
-      hideDialog(true)
-      return
-    }
-
-    val builder = AlertDialog.Builder(reactApplicationContext.currentActivity!!)
-    builder.setMessage(editorConfig?.getString("cancelDialogMessage"))
-    builder.setTitle(editorConfig?.getString("cancelDialogTitle"))
-    builder.setCancelable(false)
-    builder.setPositiveButton(editorConfig?.getString("cancelDialogConfirmText")) { dialog: DialogInterface, _: Int ->
-      dialog.cancel()
-      sendEvent("onCancel", null)
-      hideDialog(true)
-    }
-    builder.setNegativeButton(
-      editorConfig?.getString("cancelDialogCancelText") ?: "Cancel"
-    ) { dialog: DialogInterface, _: Int ->
-      dialog.cancel()
-    }
-    val alertDialog = builder.create()
-    alertDialog.show()
+    sendEvent("onCancel", null)
+    hideDialog(true)
   }
 
   override fun onSave() {
-    if (!editorConfig?.getBoolean("enableSaveDialog")!!) {
-      startTrim()
-      return
-    }
-
-    val builder = AlertDialog.Builder(reactApplicationContext.currentActivity!!)
-    builder.setMessage(editorConfig?.getString("saveDialogMessage"))
-    builder.setTitle(editorConfig?.getString("saveDialogTitle"))
-    builder.setCancelable(false)
-    builder.setPositiveButton(editorConfig?.getString("saveDialogConfirmText")) { dialog: DialogInterface, _: Int ->
-      dialog.cancel()
-      startTrim()
-    }
-    builder.setNegativeButton(
-      editorConfig?.getString("saveDialogCancelText") ?: "Cancel"
-    ) { dialog: DialogInterface, _: Int ->
-      dialog.cancel()
-    }
-    val alertDialog = builder.create()
-    alertDialog.show()
+    startTrim()
   }
 
   override fun onLog(log: WritableMap) {
@@ -389,113 +343,11 @@ open class BaseVideoTrimModule internal constructor(
   }
 
   private fun startTrim() {
-    val activity = reactApplicationContext.currentActivity
-    // Create the parent layout for the dialog
-    val layout = LinearLayout(activity)
-    layout.layoutParams = ViewGroup.LayoutParams(
-      ViewGroup.LayoutParams.WRAP_CONTENT,
-      ViewGroup.LayoutParams.WRAP_CONTENT
-    )
-    layout.orientation = LinearLayout.VERTICAL
-    layout.gravity = Gravity.CENTER_HORIZONTAL
-    layout.setPadding(16, 32, 16, 32)
-
-    // Create and add the TextView
-    val textView = TextView(activity)
-    textView.layoutParams = ViewGroup.LayoutParams(
-      ViewGroup.LayoutParams.WRAP_CONTENT,
-      ViewGroup.LayoutParams.WRAP_CONTENT
-    )
-    textView.text = editorConfig?.getString("trimmingText")
-      ?: "Trimming in progress..."
-    textView.gravity = Gravity.CENTER
-    textView.textSize = 18f
-    layout.addView(textView)
-
-    // Create and add the ProgressBar
-    mProgressBar = ProgressBar(activity, null, progressBarStyleHorizontal)
-    mProgressBar!!.layoutParams = ViewGroup.LayoutParams(
-      ViewGroup.LayoutParams.MATCH_PARENT,
-      ViewGroup.LayoutParams.WRAP_CONTENT
-    )
-    mProgressBar!!.progressTintList = ColorStateList.valueOf("#2196F3".toColorInt())
-    layout.addView(mProgressBar)
-
-    // Create button
-    if (editorConfig?.getBoolean("enableCancelTrimming") == true) {
-      val button = Button(activity)
-      button.layoutParams = ViewGroup.LayoutParams(
-        ViewGroup.LayoutParams.WRAP_CONTENT,
-        ViewGroup.LayoutParams.WRAP_CONTENT
-      )
-      // Set the text and style it like a text button
-      button.text = editorConfig?.getString("cancelTrimmingText")
-        ?: "Cancel Trimming"
-      button.setTextColor(
-        ContextCompat.getColor(
-          activity!!,
-          holo_red_light
-        )
-      ) // or use your custom color
-
-      // Apply ripple effect while keeping the button background transparent
-      val outValue = TypedValue()
-      activity.theme.resolveAttribute(selectableItemBackground, outValue, true)
-      button.setBackgroundResource(outValue.resourceId)
-      button.setOnClickListener { _: View? ->
-        if (editorConfig?.getBoolean("enableCancelTrimmingDialog") == true) {
-          val builder = AlertDialog.Builder(
-            activity
-          )
-          builder.setMessage(editorConfig?.getString("cancelTrimmingDialogMessage"))
-          builder.setTitle(editorConfig?.getString("cancelTrimmingDialogTitle"))
-          builder.setCancelable(false)
-          builder.setPositiveButton(editorConfig?.getString("cancelTrimmingDialogConfirmText")) { _: DialogInterface?, _: Int ->
-            if (trimmerView != null) {
-              trimmerView!!.onCancelTrimClicked()
-            }
-            if (mProgressDialog != null && mProgressDialog!!.isShowing) {
-              mProgressDialog!!.dismiss()
-            }
-          }
-          builder.setNegativeButton(
-            editorConfig?.getString("cancelTrimmingDialogCancelText") ?: "Close"
-          ) { dialog: DialogInterface, _: Int ->
-            dialog.cancel()
-          }
-          cancelTrimmingConfirmDialog = builder.create()
-          cancelTrimmingConfirmDialog!!.show()
-        } else {
-          if (trimmerView != null) {
-            trimmerView!!.onCancelTrimClicked()
-          }
-
-          if (mProgressDialog != null && mProgressDialog!!.isShowing) {
-            mProgressDialog!!.dismiss()
-          }
-        }
-      }
-      layout.addView(button)
+    sendEvent("onStartTrimming", null)
+    if (trimmerView != null) {
+      trimmerView!!.showSaveButtonSpinner()
+      trimmerView!!.onSaveClicked()
     }
-
-    // Create the AlertDialog
-    val builder = AlertDialog.Builder(
-      activity!!
-    )
-    builder.setCancelable(false)
-    builder.setView(layout)
-
-    // Show the dialog
-    mProgressDialog = builder.create()
-
-    mProgressDialog!!.setOnShowListener {
-      sendEvent("onStartTrimming", null)
-      if (trimmerView != null) {
-        trimmerView!!.onSaveClicked()
-      }
-    }
-
-    mProgressDialog!!.show()
   }
 
   private fun hideDialog(shouldCloseEditor: Boolean) {
@@ -505,12 +357,6 @@ open class BaseVideoTrimModule internal constructor(
         cancelTrimmingConfirmDialog!!.dismiss()
       }
       cancelTrimmingConfirmDialog = null
-    }
-
-    if (mProgressDialog != null) {
-      if (mProgressDialog!!.isShowing) mProgressDialog!!.dismiss()
-      mProgressBar = null
-      mProgressDialog = null
     }
 
     if (shouldCloseEditor) {

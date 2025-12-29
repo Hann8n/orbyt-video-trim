@@ -11,30 +11,45 @@ import React
 
 extension CMTime {
     var displayString: String {
-        let offset = TimeInterval(seconds)
-        let numberOfNanosecondsFloat = (offset - TimeInterval(Int(offset))) * 100.0
-        let nanoseconds = Int(numberOfNanosecondsFloat)
+        let totalSeconds = seconds
+        let minutes = Int(totalSeconds) / 60
+        let seconds = Int(totalSeconds) % 60
+        let decimal = Int((totalSeconds.truncatingRemainder(dividingBy: 1.0)) * 10)
         
-        let formatter = CMTime.dateFormatter
-        return String(format: "%@.%02d", formatter.string(from: offset) ?? "00:00", nanoseconds)
+        if minutes > 0 {
+            // Format: "M:SS.D" (no leading zeros on minutes, 1 decimal place)
+            return String(format: "%d:%02d.%d", minutes, seconds, decimal)
+        } else {
+            // Format: "S.D" (no leading zeros, 1 decimal place)
+            return String(format: "%d.%d", seconds, decimal)
+        }
     }
-    
-    private static var dateFormatter: DateComponentsFormatter = {
-        let formatter = DateComponentsFormatter()
-        formatter.unitsStyle = .positional
-        formatter.zeroFormattingBehavior = .pad
-        formatter.allowedUnits = [.minute, .second]
-        return formatter
-    }()
 }
 
 @available(iOS 13.0, *)
 class VideoTrimmerViewController: UIViewController {
+    
+    // Helper to find the correct bundle for resources
+    // When using 'resources' in podspec, files are copied to main bundle
+    // When using 'resource_bundles', files are in a separate bundle
+    private static var resourceBundle: Bundle? = {
+        // Check main bundle first (most common for 'resources')
+        if Bundle.main.path(forResource: "close_fill", ofType: "png") != nil {
+            return Bundle.main
+        }
+        // Check pod bundle (for 'resource_bundles' or if resources end up there)
+        let podBundle = Bundle(for: VideoTrimmerViewController.self)
+        if podBundle.path(forResource: "close_fill", ofType: "png") != nil {
+            return podBundle
+        }
+        // Default to main bundle
+        return Bundle.main
+    }()
     var asset: AVAsset? {
         didSet {
             if let _ = asset {
-                setupVideoTrimmer()
                 setupPlayerController()
+                setupVideoTrimmer()
                 setupTimeObserver()
                 updateLabels()
             }
@@ -42,6 +57,7 @@ class VideoTrimmerViewController: UIViewController {
     }
     private var maximumDuration: Int?
     private var minimumDuration: Int?
+    // Button text variables kept for API compatibility but not used (icons are used instead)
     private var cancelButtonText = "Cancel"
     private var saveButtonText = "Save"
     var cancelBtnClicked: (() -> Void)?
@@ -59,7 +75,6 @@ class VideoTrimmerViewController: UIViewController {
     private var leadingTrimLabel: UILabel!
     private var currentTimeLabel: UILabel!
     private var trailingTrimLabel: UILabel!
-    private var btnStackView: UIStackView!
     private var cancelBtn: UIButton!
     private var playBtn: UIButton!
     private let loadingIndicator = UIActivityIndicatorView()
@@ -67,9 +82,38 @@ class VideoTrimmerViewController: UIViewController {
     private let playIcon = UIImage(systemName: "play.fill")
     private let pauseIcon = UIImage(systemName: "pause.fill")
     private let audioBannerView = UIImage(systemName: "airpodsmax")
+    private lazy var cancelIcon: UIImage? = {
+        guard let bundle = VideoTrimmerViewController.resourceBundle else {
+            return UIImage(named: "close_fill")
+        }
+        // Try with extension first
+        if let image = UIImage(named: "close_fill.png", in: bundle, compatibleWith: nil) {
+            return image
+        }
+        // Try without extension
+        if let image = UIImage(named: "close_fill", in: bundle, compatibleWith: nil) {
+            return image
+        }
+        // Fallback to main bundle
+        return UIImage(named: "close_fill")
+    }()
+    private lazy var saveIcon: UIImage? = {
+        guard let bundle = VideoTrimmerViewController.resourceBundle else {
+            return UIImage(named: "arrow_right_fill")
+        }
+        // Try with extension first
+        if let image = UIImage(named: "arrow_right_fill.png", in: bundle, compatibleWith: nil) {
+            return image
+        }
+        // Try without extension
+        if let image = UIImage(named: "arrow_right_fill", in: bundle, compatibleWith: nil) {
+            return image
+        }
+        // Fallback to main bundle
+        return UIImage(named: "arrow_right_fill")
+    }()
     private var player: AVPlayer! { playerController.player }
     private var timeObserverToken: Any?
-    private var autoplay = false
     private var jumpToPositionOnLoad: Double = 0;
     private var headerText: String?
     private var headerTextSize = 16
@@ -82,32 +126,30 @@ class VideoTrimmerViewController: UIViewController {
     
     public func onAssetFailToLoad() {
         loadingIndicator.stopAnimating()
-        btnStackView.removeArrangedSubview(loadingIndicator)
-        loadingIndicator.removeFromSuperview()
+        loadingIndicator.alpha = 0
         
-        let imageViewContainer = UIView()
-        let imageView = UIImageView(image: UIImage(systemName: "exclamationmark.triangle.fill"))
-        imageView.tintColor = .systemYellow
-        imageView.translatesAutoresizingMaskIntoConstraints = false
+        let errorImageView = UIImageView(image: UIImage(systemName: "exclamationmark.triangle.fill"))
+        errorImageView.tintColor = .systemYellow
+        errorImageView.translatesAutoresizingMaskIntoConstraints = false
+        errorImageView.alpha = 0
+        view.addSubview(errorImageView)
         
-        imageViewContainer.addSubview(imageView)
         NSLayoutConstraint.activate([
-            imageView.widthAnchor.constraint(equalToConstant: 36),
-            imageView.heightAnchor.constraint(equalToConstant: 36),
-            imageView.centerXAnchor.constraint(equalTo: imageViewContainer.centerXAnchor),
-            imageView.centerYAnchor.constraint(equalTo: imageViewContainer.centerYAnchor)
+            errorImageView.widthAnchor.constraint(equalToConstant: 36),
+            errorImageView.heightAnchor.constraint(equalToConstant: 36),
+            errorImageView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            errorImageView.centerYAnchor.constraint(equalTo: view.centerYAnchor)
         ])
-        imageViewContainer.alpha = 0
-        
-        btnStackView.insertArrangedSubview(imageViewContainer, at: 1)
         
         UIView.animate(withDuration: 0.25, animations: {
-            imageViewContainer.alpha = 1
+            errorImageView.alpha = 1
         })
     }
     
     // MARK: - Input
     @objc private func didBeginTrimmingFromStart(_ sender: VideoTrimmer) {
+        leadingTrimLabel.isHidden = false
+        trailingTrimLabel.isHidden = false
         handleBeforeProgressChange()
     }
     
@@ -116,10 +158,14 @@ class VideoTrimmerViewController: UIViewController {
     }
     
     @objc private func didEndTrimmingFromStart(_ sender: VideoTrimmer) {
+        leadingTrimLabel.isHidden = true
+        trailingTrimLabel.isHidden = true
         handleTrimmingEnd(true)
     }
     
     @objc private func didBeginTrimmingFromEnd(_ sender: VideoTrimmer) {
+        leadingTrimLabel.isHidden = false
+        trailingTrimLabel.isHidden = false
         handleBeforeProgressChange()
     }
     
@@ -128,6 +174,8 @@ class VideoTrimmerViewController: UIViewController {
     }
     
     @objc private func didEndTrimmingFromEnd(_ sender: VideoTrimmer) {
+        leadingTrimLabel.isHidden = true
+        trailingTrimLabel.isHidden = true
         handleTrimmingEnd(false)
     }
     
@@ -146,7 +194,7 @@ class VideoTrimmerViewController: UIViewController {
     // MARK: - Private
     private func updateLabels() {
         leadingTrimLabel.text = trimmer.selectedRange.start.displayString
-        currentTimeLabel.text = trimmer.progress.displayString
+        currentTimeLabel.text = trimmer.selectedRange.duration.displayString
         trailingTrimLabel.text = trimmer.selectedRange.end.displayString
     }
     
@@ -240,19 +288,18 @@ class VideoTrimmerViewController: UIViewController {
     private func setupView() {
         self.overrideUserInterfaceStyle = .dark
         view.backgroundColor = .black // need to have this otherwise during animation the background of this VC is still white in white theme
+        // Make sure the view doesn't have any extra spacing that creates black bars
         
         if let headerText = headerText {
             headerView = UIView()
             headerView!.translatesAutoresizingMaskIntoConstraints = false
+            headerView!.backgroundColor = .clear // Make header transparent
             view.addSubview(headerView!)
-            let headerTextView = UITextView()
+            let headerTextView = UILabel()
             headerTextView.text = headerText
             headerTextView.textAlignment = .center
-          
-          headerTextView.textColor = RCTConvert.uiColor(headerTextColor)
-//          UIColor.color(fromHexNumber: headerTextColor as NSNumber?, defaultColor: .white)
-          
-            headerTextView.font = UIFont.systemFont(ofSize: CGFloat(headerTextSize))  // Set font size here
+            headerTextView.textColor = RCTConvert.uiColor(headerTextColor) ?? .white
+            headerTextView.font = UIFont.systemFont(ofSize: CGFloat(headerTextSize))
             headerTextView.translatesAutoresizingMaskIntoConstraints = false
             headerView!.addSubview(headerTextView)
             
@@ -275,28 +322,65 @@ class VideoTrimmerViewController: UIViewController {
     }
     
     private func setupButtons() {
-        cancelBtn = UIButton.createButton(title: cancelButtonText, font: .systemFont(ofSize: 18), titleColor: .white, target: self, action: #selector(onCancelBtnClicked))
+        // Match create.tsx sizing: cancel = 26, save = 30
+        let cancelIconSize: CGFloat = 26
+        let saveIconSize: CGFloat = 30
+        let resizedCancelIcon = cancelIcon?.resize(to: CGSize(width: cancelIconSize, height: cancelIconSize), scale: UIScreen.main.scale)
+        let resizedSaveIcon = saveIcon?.resize(to: CGSize(width: saveIconSize, height: saveIconSize), scale: UIScreen.main.scale)
+        
+        // Cancel button: positioned at top left like create.tsx
+        cancelBtn = UIButton.createButton(image: resizedCancelIcon, tintColor: nil, target: self, action: #selector(onCancelBtnClicked))
+        cancelBtn.backgroundColor = .clear
+        cancelBtn.isOpaque = false
+        cancelBtn.translatesAutoresizingMaskIntoConstraints = false
+        // Ensure button is above video in z-order
+        view.addSubview(cancelBtn)
+        
+        // Play button: hidden since we use tap gesture on video
         playBtn = UIButton.createButton(image: playIcon, tintColor: .white, target: self, action: #selector(togglePlay(sender:)))
         playBtn.alpha = 0
         playBtn.isEnabled = false
+        playBtn.isHidden = true
+        playBtn.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(playBtn)
         
-        saveBtn = UIButton.createButton(title: saveButtonText, font: .systemFont(ofSize: 18), titleColor: .systemBlue, target: self, action: #selector(onSaveBtnClicked))
+        // Save button: positioned at top right like create.tsx
+        saveBtn = UIButton.createButton(image: resizedSaveIcon, tintColor: nil, target: self, action: #selector(onSaveBtnClicked))
+        saveBtn.backgroundColor = .clear
+        saveBtn.isOpaque = false
         saveBtn.alpha = 0
         saveBtn.isEnabled = false
+        saveBtn.translatesAutoresizingMaskIntoConstraints = false
+        // Ensure button is above video in z-order
+        view.addSubview(saveBtn)
         
-        btnStackView = UIStackView(arrangedSubviews: [cancelBtn, loadingIndicator, saveBtn])
-        btnStackView.axis = .horizontal
-        btnStackView.alignment = .center
-        btnStackView.distribution = .fillEqually
-        btnStackView.spacing = UIStackView.spacingUseSystem
-        btnStackView.translatesAutoresizingMaskIntoConstraints = false
+        // Loading indicator: positioned in center (will be replaced by play button when ready)
+        loadingIndicator.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(loadingIndicator)
         
-        view.addSubview(btnStackView)
-        
+        // Match create.tsx positioning: top = safeAreaLayoutGuide.topAnchor + 4
+        // Cancel button: left = 4, container = 44x44
+        // Save button: right = 4, container = 44x44
         NSLayoutConstraint.activate([
-            btnStackView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
-            btnStackView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
-            btnStackView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16)
+            // Cancel button at top left - minimal spacing
+            cancelBtn.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 4),
+            cancelBtn.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 4),
+            cancelBtn.widthAnchor.constraint(equalToConstant: 44),
+            cancelBtn.heightAnchor.constraint(equalToConstant: 44),
+            
+            // Save button at top right - minimal spacing
+            saveBtn.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 4),
+            saveBtn.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -4),
+            saveBtn.widthAnchor.constraint(equalToConstant: 44),
+            saveBtn.heightAnchor.constraint(equalToConstant: 44),
+            
+            // Play button hidden (using tap gesture instead)
+            playBtn.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            playBtn.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            
+            // Loading indicator in center (temporary)
+            loadingIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            loadingIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor)
         ])
         
         loadingIndicator.startAnimating()
@@ -305,23 +389,63 @@ class VideoTrimmerViewController: UIViewController {
     private func setupTimeLabels() {
         leadingTrimLabel = UILabel.createLabel(textAlignment: .left, textColor: .white)
         leadingTrimLabel.text = "00:00.000"
-        currentTimeLabel = UILabel.createLabel(textAlignment: .center, textColor: .white)
+        leadingTrimLabel.isHidden = true
+        
+        // Duration label with white pill background - wrap in container for padding
+        currentTimeLabel = UILabel()
         currentTimeLabel.text = "00:00.000"
+        currentTimeLabel.font = UIFont.systemFont(ofSize: UIFont.preferredFont(forTextStyle: .caption1).pointSize, weight: .semibold)
+        currentTimeLabel.textColor = .black
+        currentTimeLabel.textAlignment = .center
+        currentTimeLabel.translatesAutoresizingMaskIntoConstraints = false
+        
+        // Container view with white pill background
+        let pillContainer = UIView()
+        pillContainer.backgroundColor = .white
+        pillContainer.layer.cornerRadius = 12
+        pillContainer.clipsToBounds = true
+        pillContainer.translatesAutoresizingMaskIntoConstraints = false
+        pillContainer.addSubview(currentTimeLabel)
+        
+        // Add padding constraints - pill container sizes to label content
+        NSLayoutConstraint.activate([
+            currentTimeLabel.topAnchor.constraint(equalTo: pillContainer.topAnchor, constant: 4),
+            currentTimeLabel.bottomAnchor.constraint(equalTo: pillContainer.bottomAnchor, constant: -4),
+            currentTimeLabel.leadingAnchor.constraint(equalTo: pillContainer.leadingAnchor, constant: 12),
+            currentTimeLabel.trailingAnchor.constraint(equalTo: pillContainer.trailingAnchor, constant: -12),
+            pillContainer.heightAnchor.constraint(equalToConstant: 24),
+            // Ensure pill container doesn't expand beyond its content
+            pillContainer.widthAnchor.constraint(equalTo: currentTimeLabel.widthAnchor, constant: 24) // 12pt padding on each side
+        ])
+        
         trailingTrimLabel = UILabel.createLabel(textAlignment: .right, textColor: .white)
         trailingTrimLabel.text = "00:00.000"
+        trailingTrimLabel.isHidden = true
         
-        timingStackView = UIStackView(arrangedSubviews: [leadingTrimLabel, currentTimeLabel, trailingTrimLabel])
-        timingStackView.axis = .horizontal
-        timingStackView.alignment = .fill
-        timingStackView.distribution = .fillEqually
-        timingStackView.spacing = UIStackView.spacingUseSystem
-        view.addSubview(timingStackView)
-        timingStackView.translatesAutoresizingMaskIntoConstraints = false
+        // Create a container for the center pill that won't expand
+        let centerContainer = UIView()
+        centerContainer.translatesAutoresizingMaskIntoConstraints = false
+        centerContainer.addSubview(pillContainer)
+        
+        // Center the pill container within its parent
         NSLayoutConstraint.activate([
-            timingStackView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
-            timingStackView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
-            timingStackView.bottomAnchor.constraint(equalTo: btnStackView.topAnchor, constant: -8)
+            pillContainer.centerXAnchor.constraint(equalTo: centerContainer.centerXAnchor),
+            pillContainer.centerYAnchor.constraint(equalTo: centerContainer.centerYAnchor),
+            pillContainer.topAnchor.constraint(greaterThanOrEqualTo: centerContainer.topAnchor),
+            pillContainer.bottomAnchor.constraint(lessThanOrEqualTo: centerContainer.bottomAnchor)
         ])
+        
+        // Set content hugging priority so center container doesn't expand
+        centerContainer.setContentHuggingPriority(.required, for: .horizontal)
+        centerContainer.setContentCompressionResistancePriority(.required, for: .horizontal)
+        
+        timingStackView = UIStackView(arrangedSubviews: [leadingTrimLabel, centerContainer, trailingTrimLabel])
+        timingStackView.axis = .horizontal
+        timingStackView.alignment = .center
+        timingStackView.distribution = .equalSpacing
+        timingStackView.spacing = UIStackView.spacingUseSystem
+        // Timing labels will be positioned over the trimmer, so add to player view instead
+        timingStackView.translatesAutoresizingMaskIntoConstraints = false
     }
     
     private func setupVideoTrimmer() {
@@ -355,13 +479,24 @@ class VideoTrimmerViewController: UIViewController {
         trimmer.addTarget(self, action: #selector(trailingGrabberChanged(_:)), for: VideoTrimmer.trailingGrabberChanged)
         trimmer.addTarget(self, action: #selector(didEndTrimmingFromEnd(_:)), for: VideoTrimmer.didEndTrimmingFromEnd)
         trimmer.alpha = 0
-        view.addSubview(trimmer)
+        // Add trimmer as overlay on player view
+        playerController.view.addSubview(trimmer)
         trimmer.translatesAutoresizingMaskIntoConstraints = false
+        
+        // Add timing labels as overlay on trimmer
+        playerController.view.addSubview(timingStackView)
+        
         NSLayoutConstraint.activate([
-            trimmer.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
-            trimmer.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
-            trimmer.bottomAnchor.constraint(equalTo: timingStackView.topAnchor, constant: -16),
-            trimmer.heightAnchor.constraint(equalToConstant: 50)
+            // Trimmer overlaid at bottom of video
+            trimmer.leadingAnchor.constraint(equalTo: playerController.view.leadingAnchor),
+            trimmer.trailingAnchor.constraint(equalTo: playerController.view.trailingAnchor),
+            trimmer.bottomAnchor.constraint(equalTo: playerController.view.bottomAnchor, constant: -16),
+            trimmer.heightAnchor.constraint(equalToConstant: 56),
+            
+            // Timing labels above trimmer
+            timingStackView.leadingAnchor.constraint(equalTo: playerController.view.leadingAnchor, constant: 16),
+            timingStackView.trailingAnchor.constraint(equalTo: playerController.view.trailingAnchor, constant: -16),
+            timingStackView.bottomAnchor.constraint(equalTo: trimmer.topAnchor, constant: -8)
         ])
         
         UIView.animate(withDuration: 0.25, animations: {
@@ -386,16 +521,60 @@ class VideoTrimmerViewController: UIViewController {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [])
         addChild(playerController)
         view.addSubview(playerController.view)
+        // Send video to back so buttons and header appear on top
+        view.sendSubviewToBack(playerController.view)
         playerController.view.translatesAutoresizingMaskIntoConstraints = false
+        
+        // Determine if device is tall enough to position video below status bar
+        // iPhone X and later (with notch) have taller screens, older iPhones are shorter
+        let screenHeight = UIScreen.main.bounds.height
+        let isTallDevice = screenHeight >= 812 // iPhone X and later are 812pt or taller
+        
+        // Set up constraints to position video below status bar on tall devices, centered on short devices
         NSLayoutConstraint.activate([
+            // Player view: flush with sides, fill width
             playerController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             playerController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            playerController.view.topAnchor.constraint(equalTo: headerView != nil ? headerView!.bottomAnchor : view.safeAreaLayoutGuide.topAnchor),
-            playerController.view.bottomAnchor.constraint(equalTo: trimmer.topAnchor, constant: -16)
+            // Maintain aspect ratio (required priority)
+            playerController.view.heightAnchor.constraint(equalTo: playerController.view.widthAnchor, multiplier: 16.0/9.0)
         ])
+        
+        if isTallDevice {
+            // On taller devices: position below status bar (safe area top)
+            let topConstraint = playerController.view.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor)
+            topConstraint.priority = UILayoutPriority(1000)
+            topConstraint.isActive = true
+        } else {
+            // On shorter devices: center vertically
+            let centerYConstraint = playerController.view.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+            centerYConstraint.priority = UILayoutPriority(1000)
+            centerYConstraint.isActive = true
+            
+            // But still allow extending above safe area if needed
+            let topConstraint = playerController.view.topAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.topAnchor)
+            topConstraint.priority = UILayoutPriority(750)
+            topConstraint.isActive = true
+        }
+        
+        // Bottom constraint to prevent video from going off screen
+        let bottomConstraint = playerController.view.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor)
+        bottomConstraint.priority = UILayoutPriority(1000)
+        bottomConstraint.isActive = true
+        
+        // Set video gravity to fit within view while maintaining aspect ratio (no cropping)
+        playerController.videoGravity = .resizeAspect
         
         // Add observer for the end of playback
         NotificationCenter.default.addObserver(self, selector: #selector(playerDidFinishPlaying), name: .AVPlayerItemDidPlayToEndTime, object: player.currentItem)
+        
+        // Add tap gesture to video view for play/pause
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(videoViewTapped))
+        playerController.view.addGestureRecognizer(tapGesture)
+        playerController.view.isUserInteractionEnabled = true
+    }
+    
+    @objc private func videoViewTapped() {
+        togglePlay(sender: playBtn)
     }
     
     @objc private func playerDidFinishPlaying(note: NSNotification) {
@@ -421,7 +600,7 @@ class VideoTrimmerViewController: UIViewController {
                 self.seek(to: trimmer.selectedRange.end)
             }
             
-            currentTimeLabel.text = trimmer.progress.displayString
+            currentTimeLabel.text = trimmer.selectedRange.duration.displayString
             
             self.setPlayBtnIcon()
         }
@@ -429,6 +608,15 @@ class VideoTrimmerViewController: UIViewController {
     
     private func setPlayBtnIcon() {
         self.playBtn.setImage(self.player.timeControlStatus == .playing ? self.pauseIcon : self.playIcon, for: .normal)
+    }
+    
+    private func updateSaveButtonCornerRadius() {
+        // No longer needed - buttons are just icons now
+    }
+    
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        updateSaveButtonCornerRadius()
     }
     
     // ====Smoother seek
@@ -480,7 +668,6 @@ class VideoTrimmerViewController: UIViewController {
     jumpToPositionOnLoad = config["jumpToPositionOnLoad"] as? Double ?? 0
     enableHapticFeedback = config["enableHapticFeedback"] as? Bool ?? true
     zoomOnWaitingDuration = (config["zoomOnWaitingDuration"] as? Double ?? 5.0) / 1000.0 // convert ms to s
-    autoplay = config["autoplay"] as? Bool ?? false
     headerText = config["headerText"] as? String
     headerTextSize = config["headerTextSize"] as? Int ?? 16
     headerTextColor = config["headerTextColor"] as? Double
@@ -498,9 +685,7 @@ class VideoTrimmerViewController: UIViewController {
         if keyPath == "status" {
             if player.status == .readyToPlay {
                 loadingIndicator.stopAnimating()
-                btnStackView.removeArrangedSubview(loadingIndicator)
-                loadingIndicator.removeFromSuperview()
-                btnStackView.insertArrangedSubview(playBtn, at: 1)
+                loadingIndicator.alpha = 0
                 
                 UIView.animate(withDuration: 0.25, animations: {
                     self.playBtn.alpha = 1
@@ -509,6 +694,9 @@ class VideoTrimmerViewController: UIViewController {
                     self.saveBtn.isEnabled = true
                 })
                 
+                // Update save button corner radius for pill shape
+                self.updateSaveButtonCornerRadius()
+                
                 if jumpToPositionOnLoad > 0 {
                     let duration = (asset?.duration.seconds ?? 0) * 1000
                     let time = jumpToPositionOnLoad > duration ? duration : jumpToPositionOnLoad
@@ -516,11 +704,7 @@ class VideoTrimmerViewController: UIViewController {
                     
                     self.seek(to: cmtime)
                     self.trimmer.progress = cmtime
-                    self.currentTimeLabel.text = self.trimmer.progress.displayString
-                }
-                
-                if autoplay {
-                    togglePlay(sender: playBtn)
+                    self.currentTimeLabel.text = self.trimmer.selectedRange.duration.displayString
                 }
             }
         }
@@ -534,7 +718,10 @@ private extension UIButton {
             button.setTitle(title, for: .normal)
         }
         if let image = image {
-            button.setImage(image, for: .normal)
+            // Use original rendering mode to preserve colors and quality
+            button.setImage(image.withRenderingMode(.alwaysOriginal), for: .normal)
+            button.imageView?.contentMode = .scaleAspectFit
+            button.imageView?.clipsToBounds = false
         }
         if let font = font {
             button.titleLabel?.font = font
@@ -544,9 +731,23 @@ private extension UIButton {
         }
         if let tintColor = tintColor {
             button.tintColor = tintColor
+        } else if image != nil {
+            // If no tint color specified and we have an image, use original rendering mode
+            button.setImage(image?.withRenderingMode(.alwaysOriginal), for: .normal)
         }
         button.addTarget(target, action: action, for: .touchUpInside)
         return button
+    }
+}
+
+private extension UIImage {
+    func resize(to size: CGSize, scale: CGFloat? = nil) -> UIImage? {
+        let targetScale = scale ?? self.scale
+        UIGraphicsBeginImageContextWithOptions(size, false, targetScale)
+        defer { UIGraphicsEndImageContext() }
+        draw(in: CGRect(origin: .zero, size: size))
+        let resizedImage = UIGraphicsGetImageFromCurrentImageContext()
+        return resizedImage?.withRenderingMode(.alwaysOriginal)
     }
 }
 
@@ -559,3 +760,4 @@ private extension UILabel {
         return label
     }
 }
+

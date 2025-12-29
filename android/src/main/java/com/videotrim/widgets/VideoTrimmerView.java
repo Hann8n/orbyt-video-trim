@@ -110,15 +110,14 @@ public class VideoTrimmerView extends FrameLayout implements IVideoTrimmerView {
 
   private MediaMetadataRetriever mediaMetadataRetriever;
   private ProgressBar loadingIndicator;
-  private TextView saveBtn;
-  private TextView cancelBtn;
+  private ImageView saveBtn;
+  private ImageView cancelBtn;
   private FrameLayout audioBannerView;
   private boolean isVideoType = true;
   private ImageView failToLoadBtn;
 
   private String mOutputExt = "mp4";
   private boolean enableHapticFeedback = true;
-  private boolean autoplay = false;
   private long jumpToPositionOnLoad = 0;
   private FrameLayout headerView;
   private TextView headerText;
@@ -172,6 +171,10 @@ public class VideoTrimmerView extends FrameLayout implements IVideoTrimmerView {
     trailingHandle = findViewById(R.id.trailingHandle);
     leadingOverlay = findViewById(R.id.leadingOverlay);
     trailingOverlay = findViewById(R.id.trailingOverlay);
+
+    // Hide start/end time labels initially - show only when cropping
+    startTimeText.setVisibility(View.GONE);
+    endTimeText.setVisibility(View.GONE);
 
     trimmerContainerWrapper = findViewById(R.id.trimmerContainerWrapper);
     trimmerContainerWrapper.setVisibility(View.INVISIBLE);
@@ -320,10 +323,6 @@ public class VideoTrimmerView extends FrameLayout implements IVideoTrimmerView {
       seekTo(jumpToPositionOnLoad > mDuration ? mDuration : jumpToPositionOnLoad, true);
     }
 
-    if (autoplay) {
-      playOrPause();
-    }
-
     mOnTrimVideoListener.onLoad(mDuration);
     ignoreSystemGestureForView(trimmerView);
   }
@@ -369,9 +368,6 @@ public class VideoTrimmerView extends FrameLayout implements IVideoTrimmerView {
     if (mediaPlayer.isPlaying()) {
       onMediaPause();
     } else {
-      if (mediaPlayer.getCurrentPosition() >= endTime) {
-        seekTo(startTime, true);
-      }
       mediaPlayer.start();
       startTimingRunnable();
     }
@@ -493,8 +489,7 @@ public class VideoTrimmerView extends FrameLayout implements IVideoTrimmerView {
       mMinDuration = (long) Math.max(1000L, config.getDouble("minDuration") * 1000L);
     }
 
-    cancelBtn.setText(config.getString("cancelButtonText"));
-    saveBtn.setText(config.getString("saveButtonText"));
+    // Icons are set in XML layout, no need to set text
     isVideoType = config.hasKey("type") && Objects.equals(config.getString("type"), "video");
     System.out.println("isVideoType: " + isVideoType);
 
@@ -503,7 +498,6 @@ public class VideoTrimmerView extends FrameLayout implements IVideoTrimmerView {
       mOutputExt = "wav";
     }
     enableHapticFeedback = config.hasKey("enableHapticFeedback") && config.getBoolean("enableHapticFeedback");
-    autoplay = config.hasKey("autoplay") && config.getBoolean("autoplay");
 
     if (config.hasKey("jumpToPositionOnLoad") && config.getDouble("jumpToPositionOnLoad") > 0) {
       jumpToPositionOnLoad = (long) Math.max(0, config.getDouble("jumpToPositionOnLoad") * 1000L);
@@ -605,8 +599,10 @@ public class VideoTrimmerView extends FrameLayout implements IVideoTrimmerView {
       currentPosition = (int) startTime;
     }
 
-    String currentTime = formatTime(currentPosition);
-    currentTimeText.setText(currentTime);
+    // Calculate and display trim duration (endTime - startTime)
+    long trimDuration = this.endTime - this.startTime;
+    String duration = formatTime((int) trimDuration);
+    currentTimeText.setText(duration);
 
     String startTime = formatTime((int) this.startTime);
     startTimeText.setText(startTime);
@@ -658,8 +654,15 @@ public class VideoTrimmerView extends FrameLayout implements IVideoTrimmerView {
     int totalSeconds = milliseconds / 1000;
     int minutes = totalSeconds / 60;
     int seconds = totalSeconds % 60;
-    int millis = milliseconds % 1000;
-    return String.format(Locale.getDefault(), "%d:%02d.%03d", minutes, seconds, millis);
+    int decimal = (milliseconds % 1000) / 100; // First decimal place (tenths)
+    
+    if (minutes > 0) {
+      // Format: "M:SS.D" (no leading zeros on minutes, 1 decimal place)
+      return String.format(Locale.getDefault(), "%d:%02d.%d", minutes, seconds, decimal);
+    } else {
+      // Format: "S.D" (no leading zeros, 1 decimal place)
+      return String.format(Locale.getDefault(), "%d.%d", seconds, decimal);
+    }
   }
 
   private void setProgressIndicatorTouchListener() {
@@ -742,6 +745,9 @@ public class VideoTrimmerView extends FrameLayout implements IVideoTrimmerView {
           seekTo(isLeading ? startTime : endTime, true);
           playHapticFeedback(true);
           isTrimmingLeading = isLeading;
+          // Show start/end time labels when cropping begins
+          startTimeText.setVisibility(View.VISIBLE);
+          endTimeText.setVisibility(View.VISIBLE);
           break;
         case MotionEvent.ACTION_MOVE:
           if (draggingDisabled) {
@@ -885,6 +891,9 @@ public class VideoTrimmerView extends FrameLayout implements IVideoTrimmerView {
         case MotionEvent.ACTION_UP:
           stopZoomIfNeeded();
           fadeInProgressIndicator();
+          // Hide start/end time labels when cropping ends
+          startTimeText.setVisibility(View.GONE);
+          endTimeText.setVisibility(View.GONE);
           view.performClick();
           break;
         default:
